@@ -1,18 +1,18 @@
 # Usage
 
 ## Install
-go get -u github.com/AnatolyShirykalov/go-vk
+go get -u github.com/AnatolyShirykalov/apivk
 ## Test function
 ```go
 package main
 
 import (
-  vk "github.com/AnatolyShirykalov/go-vk"
+  vk "github.com/AnatolyShirykalov/apivk"
 )
 
 func main() {
 
   token := "vk-api-token"
-  vk.Run(token)
+  apivk.Run(token)
 }
 ```
