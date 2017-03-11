@@ -9,6 +9,24 @@ import (
 
 const root = "https://api.vk.com/method/"
 
+type VkResult []interface{}
+
+func (v *VkResult) Pluck(key string) []interface{} {
+	ret := make([]interface{}, 0, len(*v))
+	for _, e := range *v {
+		if e == nil {
+			panic("Pluck panic: nil element")
+		}
+		em := e.(map[string]interface{})
+		if key == "id" {
+			ret = append(ret, int(em[key].(float64)))
+		} else {
+			ret = append(ret, em[key])
+		}
+	}
+	return ret
+}
+
 func Init(tkn string) func(string, map[string]string) (*resty.Response, error) {
 	return func(method string, pars map[string]string) (*resty.Response, error) {
 		if _, ok := pars["access_token"]; !ok {
@@ -24,29 +42,47 @@ func Init(tkn string) func(string, map[string]string) (*resty.Response, error) {
 	}
 }
 
-func Woodpecker(tkn string) func(string, map[string]string) []interface{} {
+func Woodpecker(tkn string) func(string, map[string]string) VkResult {
 	get := Init(tkn)
-	return func(method string, params map[string]string) []interface{} {
+	return func(method string, params map[string]string) VkResult {
 		done := false
-		ret := make([]interface{}, 20)
+		ret := make(VkResult, 0, 20)
 		for !done {
 			resp, err := get(method, params)
 			if err != nil {
 				panic(err)
 			}
-			data := make(map[string]interface{})
-			err = json.Unmarshal(resp.Body(), &data)
+			pre := make(map[string]interface{})
+			err = json.Unmarshal(resp.Body(), &pre)
 			if err != nil {
 				panic(err)
 			}
-			if _, ok := data["response"]; ok {
+			var data map[string]interface{}
+			if p, ok := pre["response"]; ok {
+				switch p.(type) {
+				case map[string]interface{}:
+					data = pre
+				case []interface{}:
+					data = map[string]interface{}{
+						"response": map[string]interface{}{
+							"items": p,
+							"count": float64(len(p.([]interface{}))),
+						},
+					}
+				default:
+					panic("default")
+				}
 				done = true
+				if _, ok1 := data["response"]; !ok1 {
+					panic("no data.response")
+				}
 				res := data["response"].(map[string]interface{})
 				count := int(res["count"].(float64))
 				_, has_count := params["count"]
 				if count > 0 && has_count {
 					items := res["items"].([]interface{})
 					ret = append(ret, items...)
+					//fmt.Println("[Debug]", method, count, len(items))
 					if count > len(items) {
 						var offset int
 						if _, has_offset := params["offset"]; !has_offset {
@@ -57,13 +93,16 @@ func Woodpecker(tkn string) func(string, map[string]string) []interface{} {
 						}
 						if offset+len(items) < count {
 							offset += len(items)
+							params["offset"] = fmt.Sprintf("%d", offset)
 							done = false
 						}
 					}
-					fmt.Println(len(items), count)
+					//fmt.Println(len(items), count)
+				} else {
+					return res["items"].([]interface{})
 				}
 			} else {
-				vk_err := data["error"].(map[string]interface{})
+				vk_err := pre["error"].(map[string]interface{})
 				if msg := vk_err["error_msg"]; msg == "Too many requests per second" {
 					fmt.Println("error", msg, "Try again")
 				} else {
@@ -261,6 +300,19 @@ func Run(token string) {
 			"q":     fmt.Sprintf("подслушано %s", station),
 			"count": "20",
 		})
-		data = data
+		str := ""
+		for i, el := range data.Pluck("id") {
+			if i != 0 {
+				str = fmt.Sprintf("%s%s", str, ",")
+			}
+			str = fmt.Sprintf("%s%d", str, el)
+		}
+		if len(str) > 0 {
+			good := get("groups.getById", map[string]string{
+				"group_ids": str,
+				"fields":    "members_count",
+			})
+			fmt.Println(good.Pluck("members_count"))
+		}
 	}
 }
